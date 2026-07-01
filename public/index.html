@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Relay Protection</title>
+    
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2338bdf8'><path d='M13 10V3L4 14h7v7l9-11h-7z'/></svg>">
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    
+    <style>
+        /* ==========================================
+           1. VARIABEL TEMA & WARNA
+           ========================================== */
+        :root {
+            --bg-body: #f8fafc; 
+            --bg-card: #ffffff; 
+            --bg-input: #f1f5f9;
+            --text-main: #0f172a; 
+            --text-muted: #64748b; 
+            --border: #e2e8f0;
+            --primary: #3b82f6; 
+            --success: #10b981; 
+            --danger: #ef4444; 
+            --warning: #f59e0b;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: #0f172a; 
+            --bg-card: #1e293b; 
+            --bg-input: #0f172a;
+            --text-main: #f8fafc; 
+            --text-muted: #94a3b8; 
+            --border: #334155;
+            --primary: #38bdf8; 
+            --success: #10b981; 
+            --danger: #f43f5e; 
+            --warning: #fbbf24;
+        }
+
+        /* ==========================================
+           2. RESET & LAYOUT UTAMA
+           ========================================== */
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            transition: background-color 0.3s, border-color 0.3s; 
+        }
+
+        body { 
+            background-color: var(--bg-body); 
+            color: var(--text-main); 
+            line-height: 1.5; 
+            padding: 1.5rem; 
+            overflow-x: hidden; 
+        }
+
+        .container { 
+            display: grid; 
+            grid-template-columns: 320px minmax(0, 1fr); 
+            gap: 1.5rem; 
+            max-width: 1440px; 
+            margin: 0 auto; 
+            align-items: start; 
+        }
+
+        @media (max-width: 1024px) { 
+            body { padding: 1rem; } 
+            .container { grid-template-columns: 1fr; } 
+        }
+
+        /* ==========================================
+           3. KOMPONEN KARTU & PANEL
+           ========================================== */
+        .card { 
+            background: var(--bg-card); 
+            border: 1px solid var(--border); 
+            border-radius: 1rem; 
+            padding: 1.5rem; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 1.25rem; 
+        }
+
+        .card-header { 
+            font-size: 0.75rem; 
+            font-weight: 800; 
+            text-transform: uppercase; 
+            color: var(--text-muted); 
+            border-bottom: 1px solid var(--border); 
+            padding-bottom: 0.75rem; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+
+        /* ==========================================
+           4. STATUS HERO (INDIKATOR RELAY)
+           ========================================== */
+        .status-hero { 
+            text-align: center; 
+            padding: 2rem 1rem; 
+            border-radius: 0.75rem; 
+            border: 2px solid transparent; 
+            background: var(--bg-input); 
+        }
+        .status-hero.on { border-color: rgba(16, 185, 129, 0.5); }
+        .status-hero.off { border-color: rgba(244, 63, 94, 0.5); }
+        
+        .status-hero h2 { 
+            font-size: clamp(2rem, 5vw, 2.5rem); 
+            font-weight: 800; 
+            margin-bottom: 0.25rem; 
+        }
+        .status-hero.on h2 { color: var(--success); } 
+        .status-hero.off h2 { color: var(--danger); }
+        
+        .status-reason { 
+            font-size: 0.85rem; 
+            color: var(--text-muted); 
+            font-weight: 600; 
+        }
+
+        /* ==========================================
+           5. INPUT & FORM CONTROLS
+           ========================================== */
+        .input-row { 
+            display: flex; 
+            align-items: center; 
+            gap: 1rem; 
+        }
+        
+        input[type=range] { 
+            flex: 1; 
+            accent-color: var(--primary); 
+        }
+        
+        input[type=number], input[type=text] { 
+            background: var(--bg-input); 
+            border: 1px solid var(--border); 
+            color: var(--text-main); 
+            padding: 0.75rem; 
+            border-radius: 0.5rem; 
+            font-weight: 600; 
+            font-size: 0.9rem; 
+            outline: none; 
+            width: 100%; 
+        }
+        
+        input[type=number]:focus, input[type=text]:focus { 
+            border-color: var(--primary); 
+        }
+        
+        .input-short { 
+            width: 90px; 
+            text-align: center; 
+            font-weight: 800; 
+        }
+
+        .limit-info {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            background: var(--bg-input);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            margin-top: -0.25rem;
+            display: flex;
+            justify-content: space-between;
+            border: 1px dashed var(--border);
+        }
+
+        /* ==========================================
+           6. GRID TELEMETRI SENSOR
+           ========================================== */
+        .tele-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); 
+            gap: 1rem; 
+        }
+        .tele-box { 
+            background: var(--bg-input); 
+            border: 1px solid var(--border); 
+            border-radius: 0.75rem; 
+            padding: 1rem; 
+        }
+        .tele-label { 
+            font-size: 0.7rem; 
+            font-weight: 800; 
+            color: var(--text-muted); 
+            text-transform: uppercase; 
+            margin-bottom: 0.25rem; 
+        }
+        .tele-val { 
+            font-size: clamp(1.4rem, 2.5vw, 1.8rem); 
+            font-weight: 800; 
+            display: flex; 
+            align-items: baseline; 
+            gap: 0.25rem; 
+        }
+        .tele-unit { 
+            font-size: 0.8rem; 
+            color: var(--primary); 
+        }
+
+        /* ==========================================
+           7. TOMBOL (BUTTONS)
+           ========================================== */
+        .btn { 
+            padding: 0.75rem 1rem; 
+            border-radius: 0.5rem; 
+            font-weight: 700; 
+            font-size: 0.85rem; 
+            cursor: pointer; 
+            border: 1px solid transparent; 
+            text-align: center; 
+            width: 100%; 
+            display: inline-block; 
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-outline { background: transparent; border-color: var(--border); color: var(--text-main); }
+        .btn-danger { background: rgba(244, 63, 94, 0.1); border-color: var(--danger); color: var(--danger); }
+        .btn-warning { background: var(--warning); color: #000; }
+
+        .grid-2-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+        .grid-half { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
+        /* ==========================================
+           8. BAR STATUS FUZZY
+           ========================================== */
+        .fz-row { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 0.5rem; 
+            background: var(--bg-input); 
+            padding: 1rem; 
+            border-radius: 0.75rem; 
+            border: 1px solid var(--border); 
+        }
+        .fz-head { 
+            display: flex; 
+            justify-content: space-between; 
+            font-size: 0.8rem; 
+            font-weight: 800; 
+        }
+        .fz-track { 
+            width: 100%; 
+            height: 8px; 
+            background: var(--border); 
+            border-radius: 99px; 
+            overflow: hidden; 
+            position: relative; 
+        }
+        .fz-fill { 
+            height: 100%; 
+            width: 0%; 
+            background: var(--success); 
+            transition: width 0.3s; 
+            border-radius: 99px; 
+        }
+        .fz-fill.warning { background: var(--warning); } 
+        .fz-fill.danger { background: var(--danger); }
+
+        /* ==========================================
+           9. KOMPONEN LAINNYA (TERMINAL & OTA)
+           ========================================== */
+        .terminal { 
+            background: #000; 
+            border: 1px solid var(--border); 
+            border-radius: 0.75rem; 
+            padding: 1rem; 
+            font-family: 'JetBrains Mono', monospace; 
+            font-size: 0.75rem; 
+            color: #a8b2d1; 
+            height: 160px; 
+            overflow-y: auto; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 0.25rem; 
+        }
+        
+        #otaProgressContainer { display: none; margin-top: 0.5rem; }
+        #otaProgressBar { 
+            width: 0%; 
+            height: 4px; 
+            background: var(--primary); 
+            border-radius: 2px; 
+            transition: width 0.2s; 
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <aside style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <div class="card" style="flex-direction: row; justify-content: space-between; align-items: center; padding: 1rem 1.5rem;">
+            <div style="font-size:1.5rem; font-weight:800;">Smart<span style="color:var(--primary);">Relay</span></div>
+            <button class="btn-outline" style="width: auto; padding: 0.5rem;" onclick="toggleTheme()" id="themeBtn">Light Mode</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span>System Status</span>
+                <span id="connState" style="color: var(--danger);">DISCONNECTED</span>
+            </div>
+            <div class="status-hero off" id="relayBox">
+                <h2 id="relayTxt">TRIP</h2>
+                <div class="status-reason" id="fuzzyReason">Menunggu Data...</div>
+            </div>
+            <button class="btn btn-warning" id="btnRecovery" style="display:none;" onclick="sendCommand('resetRecovery')">Paksa Reset Beban</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span>Threshold Limits</span></div>
+            
+            <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem; font-weight:700;"><span>Arus (A)</span></div>
+                <div class="input-row">
+                    <input type="range" id="slI" min="0.1" max="10.0" step="0.1" value="2.0">
+                    <input type="number" class="input-short" id="nmI" step="0.1">
+                </div>
+                <div class="limit-info" id="infoI">Menghitung...</div>
+            </div>
+            
+            <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:1rem;">
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem; font-weight:700;"><span>Daya (W)</span></div>
+                <div class="input-row">
+                    <input type="range" id="slP" min="10" max="2500" step="10" value="440">
+                    <input type="number" class="input-short" id="nmP">
+                </div>
+                <div class="limit-info" id="infoP">Menghitung...</div>
+            </div>
+        </div>
+    </aside>
+
+    <main style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <div class="card">
+            <div class="card-header"><span>Real-Time Telemetry</span></div>
+            <div class="tele-grid">
+                <div class="tele-box"><div class="tele-label">Tegangan</div><div class="tele-val" id="v">0<span class="tele-unit">V</span></div></div>
+                <div class="tele-box"><div class="tele-label">Arus</div><div class="tele-val" id="i">0.00<span class="tele-unit">A</span></div></div>
+                <div class="tele-box"><div class="tele-label">Daya Aktif</div><div class="tele-val" id="p">0<span class="tele-unit">W</span></div></div>
+                <div class="tele-box"><div class="tele-label">Total Energi</div><div class="tele-val" id="e">0.000<span class="tele-unit">kWh</span></div></div>
+                <div class="tele-box"><div class="tele-label">Frekuensi</div><div class="tele-val" id="f">0.0<span class="tele-unit">Hz</span></div></div>
+                <div class="tele-box"><div class="tele-label">Power Factor</div><div class="tele-val" id="pf">0.00<span class="tele-unit">PF</span></div></div>
+            </div>
+        </div>
+
+        <div class="grid-2-col">
+            <div class="card">
+                <div class="card-header"><span>Power Chart</span></div>
+                <div style="position: relative; height: 220px; width: 100%;">
+                    <canvas id="powerChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><span>Fuzzy Inference Engine</span></div>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    
+                    <div class="fz-row">
+                        <div class="fz-head"><span>Fuzzifikasi Tegangan</span> <span id="txtFzV">Normal</span></div>
+                        <div class="fz-track"><div class="fz-fill" id="barFzV" style="width: 50%;"></div></div>
+                    </div>
+                    
+                    <div class="fz-row">
+                        <div class="fz-head"><span>Beban Arus (I)</span> <span id="txtFzI">0%</span></div>
+                        <div class="fz-track"><div class="fz-fill" id="barFzI" style="width: 0%;"></div></div>
+                    </div>
+                    
+                    <div class="fz-row">
+                        <div class="fz-head"><span>Beban Daya (P)</span> <span id="txtFzP">0%</span></div>
+                        <div class="fz-track"><div class="fz-fill" id="barFzP" style="width: 0%;"></div></div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2-col">
+            <div class="card">
+                <div class="card-header"><span>Maintenance &amp; OTA</span></div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="file" id="otaFile" accept=".bin" style="display: none;">
+                    <label for="otaFile" class="btn btn-outline" id="fileLabel" style="flex: 1; text-align: left; overflow: hidden; white-space: nowrap;">Pilih Firmware.bin</label>
+                    <button class="btn btn-primary" style="width: auto;" onclick="uploadOTA()">Deploy</button>
+                </div>
+                <div id="otaProgressContainer"><div id="otaProgressBar"></div></div>
+
+                <div class="card-header" style="margin-top: 0.5rem; border: none; padding: 0;"><span>Memory Actions</span></div>
+                <div class="grid-half">
+                    <button class="btn btn-outline" onclick="sendCommand('resetKwh')">Reset kWh</button>
+                    <button class="btn btn-danger" onclick="if(confirm('Reset Alat ke AP Mode?')) sendCommand('resetWifi')">Factory Reset</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><span>Network &amp; Console</span></div>
+                <div class="grid-half">
+                    <input type="text" id="netIp" placeholder="Static IP (Kosong=DHCP)">
+                    <input type="text" id="netGw" placeholder="Gateway">
+                </div>
+                <button class="btn btn-outline" style="margin-bottom: 0.5rem;" onclick="applyNetwork()">Push Network Config</button>
+                
+                <div class="terminal" id="terminalLog">
+                    <div>~$ System Init...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    // --- PENGATURAN TEMA GELAP/TERANG ---
+    function toggleTheme() {
+        const html = document.documentElement;
+        const isDark = html.getAttribute("data-theme") === "dark";
+        
+        html.setAttribute("data-theme", isDark ? "light" : "dark");
+        localStorage.setItem("theme", isDark ? "light" : "dark");
+        document.getElementById("themeBtn").innerText = isDark ? "Dark Mode" : "Light Mode";
+    }
+
+    if (localStorage.getItem("theme")) { 
+        document.documentElement.setAttribute("data-theme", localStorage.getItem("theme")); 
+    }
+
+    // --- INTERAKSI UPLOAD FILE OTA ---
+    document.getElementById('otaFile').addEventListener('change', function() {
+        document.getElementById('fileLabel').innerText = this.files[0] ? this.files[0].name : 'Pilih Firmware.bin';
+    });
+
+    // --- INISIALISASI VARIABEL GLOBAL ---
+    const socket = io();
+    let vAktual = 220.0;
+    let lastDataTime = Date.now();
+    
+    // --- FUNGSI TERMINAL LOG ---
+    function logTerm(msg) {
+        const term = document.getElementById('terminalLog');
+        term.innerHTML += `<div>~$ ${msg}</div>`;
+        term.scrollTop = term.scrollHeight;
+    }
+
+    // --- WATCHDOG TIMER (DETEKSI DATA MATI/OFFLINE) ---
+    setInterval(() => {
+        if (Date.now() - lastDataTime > 5000) {
+            document.getElementById('connState').innerText = "STALE DATA / OFFLINE";
+            document.getElementById('connState').style.color = "var(--warning)";
+        }
+    }, 1000);
+
+    // --- INISIALISASI CHART.JS ---
+    const powerChart = new Chart(document.getElementById('powerChart').getContext('2d'), {
+        type: 'line',
+        data: { 
+            labels: Array(20).fill(''), 
+            datasets: [{ 
+                label: 'Daya (W)', 
+                borderColor: '#38bdf8', 
+                backgroundColor: 'rgba(56, 189, 248, 0.1)', 
+                borderWidth: 2, 
+                fill: true, 
+                pointRadius: 0, 
+                data: Array(20).fill(0) 
+            }] 
+        },
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false, 
+            animation: false, 
+            scales: { x: { display: false } }, 
+            plugins: { legend: { display: false } } 
+        }
+    });
+
+    // --- EVENT LISTENER SOCKET.IO ---
+    socket.on('connect', () => { 
+        logTerm("Socket.IO Connected"); 
+        document.getElementById('connState').innerText = "ONLINE"; 
+        document.getElementById('connState').style.color = "var(--success)"; 
+    });
+    
+    // --- PENGATURAN INPUT BATAS & HISTERESIS ---
+    const slI = document.getElementById('slI');
+    const nmI = document.getElementById('nmI');
+    const slP = document.getElementById('slP');
+    const nmP = document.getElementById('nmP');
+
+    function renderLimitInfo(i, p) {
+        // Histeresis ESP32 adalah 5% (Faktor 1.05)
+        const tripI = (i * 1.05).toFixed(2);
+        const tripP = Math.round(p * 1.05);
+
+        document.getElementById('infoI').innerHTML = 
+            `<span>Normal: <span style="color:var(--success)">&le; ${i.toFixed(1)}A</span></span>` + 
+            `<span>Trip: <span style="color:var(--danger)">&ge; ${tripI}A</span></span>`;
+            
+        document.getElementById('infoP').innerHTML = 
+            `<span>Normal: <span style="color:var(--success)">&le; ${p}W</span></span>` + 
+            `<span>Trip: <span style="color:var(--danger)">&ge; ${tripP}W</span></span>`;
+    }
+
+    socket.on('updateLimits', d => { 
+        slI.value = d.i; 
+        nmI.value = d.i.toFixed(1); 
+        slP.value = d.p; 
+        nmP.value = d.p; 
+        renderLimitInfo(d.i, d.p); 
+    });
+
+    function updateLimitsUI(type, val) {
+        let i = type === 'i' ? parseFloat(val) : parseFloat((val / vAktual).toFixed(1));
+        let p = type === 'p' ? parseInt(val) : Math.round(val * vAktual);
+        
+        // Clamping (Pembatasan Nilai Ekstrem)
+        if (i < 0.1) i = 0.1; 
+        if (i > 10.0) i = 10.0;
+        if (p < 10) p = 10; 
+        if (p > 2500) p = 2500;
+        
+        nmI.value = i.toFixed(1); 
+        slI.value = i; 
+        nmP.value = p; 
+        slP.value = p;
+        
+        renderLimitInfo(i, p);
+        socket.emit('setLimits', {i: i, p: p});
+    }
+
+    slI.oninput = () => updateLimitsUI('i', slI.value); 
+    nmI.onchange = () => updateLimitsUI('i', nmI.value);
+    slP.oninput = () => updateLimitsUI('p', slP.value); 
+    nmP.onchange = () => updateLimitsUI('p', nmP.value);
+
+    // --- SINKRONISASI DATA TELEMETRI ---
+    socket.on('sensorData', d => {
+        if (!d) return;
+        
+        lastDataTime = Date.now();
+        document.getElementById('connState').innerText = "ONLINE";
+        document.getElementById('connState').style.color = "var(--success)";
+        
+        vAktual = d.v || 220;
+        
+        // Memperbarui Kotak Angka
+        document.getElementById('v').innerHTML = `${d.v}<span class="tele-unit">V</span>`;
+        document.getElementById('i').innerHTML = `${d.i.toFixed(2)}<span class="tele-unit">A</span>`;
+        document.getElementById('p').innerHTML = `${Number(d.p).toFixed(1)}<span class="tele-unit">W</span>`;
+        document.getElementById('e').innerHTML = `${d.e.toFixed(3)}<span class="tele-unit">kWh</span>`;
+        document.getElementById('f').innerHTML = `${d.f.toFixed(1)}<span class="tele-unit">Hz</span>`;
+        document.getElementById('pf').innerHTML = `${d.pf.toFixed(2)}<span class="tele-unit">PF</span>`;
+
+        // Memasukkan data ke Grafik (Chart.js)
+        let pData = powerChart.data.datasets[0].data; 
+        pData.push(parseFloat(Number(d.p).toFixed(1))); 
+        pData.shift(); 
+        powerChart.update();
+
+        // Evaluasi Status Relay (Kotak Hero)
+        const box = document.getElementById('relayBox'); 
+        const txt = document.getElementById('relayTxt');
+        
+        if (d.relay == "ON") { 
+            box.className = "status-hero on"; 
+            txt.innerText = "ACTIVE"; 
+        } else { 
+            box.className = "status-hero off"; 
+            txt.innerText = "TRIPPED"; 
+        }
+        
+        document.getElementById('fuzzyReason').innerText = d.alasan;
+        document.getElementById('btnRecovery').style.display = d.recovery ? 'block' : 'none';
+
+        // Menerapkan Visualisasi Logika Fuzzy
+        updateFuzzyVolt(d.v, d.fzV);
+        updateFuzzyRatio('barFzI', 'txtFzI', d.rI, d.fzI);
+        updateFuzzyRatio('barFzP', 'txtFzP', d.rP, d.fzP);
+    });
+
+    // --- FUNGSI UPDATE BAR VISUAL (TEGANGAN & BEBAN) ---
+    function updateFuzzyVolt(val, statusText) {
+        // Sesuaikan dengan batas Trip di ESP32 (misal: 235 Volt)
+        const batasOvervoltage = 235.0; 
+        
+        let pct = (val / batasOvervoltage) * 100; 
+        
+        if (pct < 0) pct = 0; 
+        if (pct > 100) pct = 100;
+
+        const bar = document.getElementById('barFzV'); 
+        const txt = document.getElementById('txtFzV');
+        
+        bar.style.width = pct + '%'; 
+        txt.innerText = `${val}V (${statusText})`;
+        
+        bar.className = 'fz-fill'; 
+        txt.style.color = 'var(--success)';
+        
+        if (statusText !== "Normal") { 
+            bar.classList.add('danger'); 
+            txt.style.color = 'var(--danger)'; 
+        } else if (val >= 230 || val <= 185) { 
+            bar.classList.add('warning'); 
+            txt.style.color = 'var(--warning)'; 
+        }
+    }
+
+    function updateFuzzyRatio(barId, txtId, val, statusText) {
+        let pct = (val * 100).toFixed(0); 
+        
+        if (pct > 100) pct = 100;
+        
+        const bar = document.getElementById(barId); 
+        const txt = document.getElementById(txtId);
+        
+        bar.style.width = pct + '%'; 
+        txt.innerText = `${pct}% (${statusText})`;
+        
+        bar.className = 'fz-fill'; 
+        txt.style.color = 'var(--success)';
+        
+        if (statusText !== "Normal") { 
+            bar.classList.add('danger'); 
+            txt.style.color = 'var(--danger)'; 
+        } else if (pct > 85) { 
+            bar.classList.add('warning'); 
+            txt.style.color = 'var(--warning)'; 
+        }
+    }
+
+    // --- FUNGSI KONTROL AKSI (COMMANDS) ---
+    function sendCommand(cmd) { 
+        socket.emit('command', cmd); 
+        logTerm(`Executed: ${cmd}`); 
+    }
+    
+    function applyNetwork() {
+        const ip = document.getElementById('netIp').value;
+        const gw = document.getElementById('netGw').value;
+        if (confirm(`Set Network Config?`)) { 
+            socket.emit('setNetwork', { ip: ip, gw: gw }); 
+            logTerm(`Network Config Sent. Restarting Device...`); 
+        }
+    }
+
+    // --- FUNGSI UPLOAD OTA VIA XMLHTTPRequest ---
+    function uploadOTA() {
+        const file = document.getElementById('otaFile').files[0];
+        
+        if (!file) return alert("Pilih file firmware .bin!");
+        
+        const formData = new FormData(); 
+        formData.append('firmware', file);
+        document.getElementById('otaProgressContainer').style.display = 'block';
+        
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                document.getElementById('otaProgressBar').style.width = percentComplete + '%';
+            }
+        });
+        
+        xhr.onload = () => { 
+            logTerm(xhr.responseText); 
+            setTimeout(() => {
+                document.getElementById('otaProgressContainer').style.display = 'none';
+            }, 3000); 
+        };
+        
+        xhr.open("POST", "/upload-ota", true);
+        xhr.send(formData);
+        logTerm(`Uploading ${file.name} to server...`);
+    }
+</script>
+</body>
+</html>

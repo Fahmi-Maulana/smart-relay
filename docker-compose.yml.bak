@@ -1,0 +1,12 @@
+name: smart-relay-server
+services:
+  backend:
+    image: node:18-alpine
+    container_name: smart-relay-backend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "npm install && node server.js"
+    ports:
+      - "3000:3000"

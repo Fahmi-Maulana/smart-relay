@@ -1,0 +1,44 @@
+name: smart-relay-server
+services:
+    backend:
+        cpu_shares: 90
+        command:
+            - sh
+            - -c
+            - npm install && node server.js
+        container_name: smart-relay-backend
+        deploy:
+            resources:
+                limits:
+                    memory: "10308550656"
+        hostname: smart-relay-backend
+        image: node:18-alpine
+        networks:
+            default: null
+        ports:
+            - mode: ingress
+              target: 3000
+              published: "3000"
+              protocol: tcp
+        restart: unless-stopped
+        volumes:
+            - type: bind
+              source: /DATA/AppData/smart-relay
+              target: /app
+              bind:
+                create_host_path: true
+        working_dir: /app
+networks:
+    default:
+        name: smart-relay-server_default
+x-casaos:
+    author: self
+    category: self
+    hostname: ""
+    icon: ""
+    index: /
+    is_uncontrolled: false
+    port_map: "3000"
+    scheme: http
+    title:
+        custom: Smart-Relay
