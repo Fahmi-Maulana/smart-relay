@@ -1,6 +1,6 @@
 # ⚡ Smart Relay Protection
 
-> **Sistem proteksi beban listrik otomatis** berbasis **ESP32 + PZEM-004T** dengan dashboard monitoring real-time melalui **WebSocket (Socket.IO)**. Server Node.js bertindak sebagai broker antara perangkat keras ESP32 dan antarmuka web, dilengkapi fitur **OTA (Over-the-Air) firmware update** dan **konfigurasi jaringan statis** jarak jauh.
+> Sistem **proteksi beban listrik otomatis** berbasis **ESP32 + PZEM-004T** dengan dashboard monitoring real-time via **Socket.IO**. Server Node.js berperan sebagai broker antara ESP32 dan antarmuka web, dilengkapi fitur **OTA firmware update** dan **konfigurasi jaringan statis** jarak jauh.
 
 ---
 
@@ -13,8 +13,6 @@
 - [Struktur Folder](#-struktur-folder)
 - [Prasyarat](#-prasyarat)
 - [Cara Menjalankan Server](#-cara-menjalankan-server)
-  - [Metode 1: Node.js Langsung](#metode-1-nodejs-langsung)
-  - [Metode 2: Docker Compose (CasaOS)](#metode-2-docker-compose-casaos)
 - [Konfigurasi Firmware ESP32](#-konfigurasi-firmware-esp32)
 - [Dokumentasi Socket Events](#-dokumentasi-socket-events)
 - [Dokumentasi REST API](#-dokumentasi-rest-api)
@@ -22,13 +20,14 @@
 - [Fitur Konfigurasi Jaringan](#-fitur-konfigurasi-jaringan)
 - [Dashboard Web](#-dashboard-web)
 - [Troubleshooting](#-troubleshooting)
+- [Dependensi](#-dependensi)
 
 ---
 
 ## ✨ Fitur Utama
 
 | Fitur | Keterangan |
-|---|---|
+| --- | --- |
 | ⚡ **Proteksi Tegangan** | Trip instan saat overvoltage (>231V) atau undervoltage (<198V) |
 | 🔒 **Proteksi Beban** | Trip saat arus atau daya melebihi batas yang dikonfigurasi |
 | 📊 **Filter DSP (EMA)** | Exponential Moving Average meredam *inrush current* adaptor laptop |
@@ -44,29 +43,29 @@
 
 ## 🏗️ Arsitektur Sistem
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        SMART RELAY SYSTEM                              │
-│                                                                        │
-│  ┌───────────────────┐   WebSocket (SSL)   ┌────────────────────────┐ │
-│  │     ESP32         │ ──────────────────▶ │  Node.js Server        │ │
-│  │  + PZEM-004T      │  42["espData", ...]  │  (Express + Socket.IO) │ │
-│  │  + Relay          │                     │                        │ │
-│  │  + LED WiFi       │ ◀────────────────── │  ✔ Broker data         │ │
-│  │                   │  42["serverToEsp"]  │  ✔ File server (OTA)   │ │
-│  │  Filter EMA (DSP) │                     │  ✔ REST upload API     │ │
-│  │  Proteksi Beban   │                     └──────────┬─────────────┘ │
-│  │  Auto-Reset 60dtk │                                │               │
-│  └───────────────────┘                     ┌──────────▼─────────────┐ │
-│                                            │  Web Dashboard         │ │
-│  ┌───────────────────┐   Socket.IO         │  (public/index.html)   │ │
-│  │  Browser / User   │ ◀────────────────── │                        │ │
-│  │                   │  sensorData         │  ✔ Chart real-time     │ │
-│  │  Kontrol Limit    │ ──────────────────▶ │  ✔ Kontrol relay       │ │
-│  │  OTA Upload       │  setLimits          │  ✔ OTA upload          │ │
-│  │  Konfigurasi IP   │  setNetwork         │  ✔ Konfigurasi jaringan│ │
-│  └───────────────────┘  command            └────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph HW["🔌 Hardware"]
+        ESP["ESP32\n+ PZEM-004T\n+ Relay"]
+    end
+
+    subgraph SRV["🖥️ Node.js Server (Express + Socket.IO)"]
+        BROKER["Broker Data"]
+        OTA_SRV["File Server OTA"]
+        API["REST API Upload"]
+    end
+
+    subgraph UI["🌐 Web Dashboard (Browser)"]
+        DASH["index.html\nChart · Kontrol · OTA · IP Config"]
+    end
+
+    ESP -->|"espData (telemetri)"| BROKER
+    BROKER -->|"serverToEsp (cmd)"| ESP
+    BROKER -->|"sensorData (broadcast)"| DASH
+    DASH -->|"setLimits / setNetwork / command"| BROKER
+    DASH -->|"POST /upload-ota"| API
+    API -->|"startOta trigger"| BROKER
+    OTA_SRV -->|"GET /firmware.bin"| ESP
 ```
 
 ---
@@ -74,21 +73,21 @@
 ## 🔌 Komponen Hardware
 
 | Komponen | Keterangan | Pin ESP32 |
-|---|---|---|
+| --- | --- | --- |
 | **ESP32** | Mikrokontroler utama | — |
-| **PZEM-004T v3.0** | Sensor tegangan, arus, daya, energi, frekuensi, PF | RX: GPIO16 / TX: GPIO17 |
-| **Relay** | Saklar beban listrik (ON/OFF otomatis) | GPIO4 |
-| **LED Indikator WiFi** | Menyala saat terhubung ke WiFi | GPIO2 |
+| **PZEM-004T v3.0** | Sensor tegangan, arus, daya, energi, frekuensi, PF | RX: `GPIO16` / TX: `GPIO17` |
+| **Relay** | Saklar beban listrik (ON/OFF otomatis) | `GPIO4` |
+| **LED Indikator WiFi** | Menyala saat terhubung ke WiFi | `GPIO2` |
 
-### Wiring PZEM-004T ke ESP32
+### Wiring PZEM-004T → ESP32
 
 ```
-PZEM-004T          ESP32
----------          -----
-  TX    ──────────▶ GPIO16 (RX2)
-  RX    ◀────────── GPIO17 (TX2)
-  GND   ──────────── GND
-  VCC   ──────────── 5V
+PZEM-004T       ESP32
+---------       -----
+TX       ──────► GPIO16 (RX2)
+RX       ◄────── GPIO17 (TX2)
+GND      ──────── GND
+VCC      ──────── 5V
 ```
 
 ---
@@ -97,44 +96,48 @@ PZEM-004T          ESP32
 
 ### Filter DSP — Exponential Moving Average (EMA)
 
-Untuk mencegah trip palsu akibat *inrush current* (lonjakan arus saat perangkat baru dinyalakan), sistem menggunakan filter EMA dengan koefisien `α = 0.15`:
+Mencegah trip palsu akibat *inrush current* menggunakan koefisien `α = 0.15`:
 
 ```
 filteredI(t) = α × rawI(t) + (1 - α) × filteredI(t-1)
 filteredP(t) = α × rawP(t) + (1 - α) × filteredP(t-1)
 ```
 
-| Parameter | Nilai | Fungsi |
-|---|---|---|
+| Parameter | Nilai | Keterangan |
+| --- | --- | --- |
 | `ALPHA` | `0.15` | Koefisien filter EMA (makin kecil = makin halus) |
-| **Deadband Arus** | `< 0.02 A` → paksa 0 | Menghilangkan noise saat beban kosong |
-| **Deadband Daya** | `< 0.5 W` → paksa 0 | Menghilangkan noise saat beban kosong |
+| Deadband Arus | `< 0.02 A` → paksa 0 | Eliminasi noise saat beban kosong |
+| Deadband Daya | `< 0.5 W` → paksa 0 | Eliminasi noise saat beban kosong |
 
-### Kondisi Proteksi
+### Kondisi Trip
 
 | Kondisi | Trigger | Aksi |
-|---|---|---|
-| **Overvoltage** | `V > 231V` | Trip instan, masuk mode recovery |
-| **Undervoltage** | `V < 198V` dan `V > 50V` | Trip instan, masuk mode recovery |
-| **Overcurrent** | `rasioArus ≥ 1.05` (5% di atas batas) | Trip, masuk mode recovery |
-| **Overpower** | `rasioDaya ≥ 1.05` (5% di atas batas) | Trip, masuk mode recovery |
-| **Sensor Gagal** | 5× pembacaan NaN berturut-turut | Trip, tampilkan error sensor |
+| --- | --- | --- |
+| **Overvoltage** | `V > 231 V` | Trip instan, masuk mode recovery |
+| **Undervoltage** | `198 V > V > 50 V` | Trip instan, masuk mode recovery |
+| **Overcurrent** | `rasioArus ≥ 1.05` | Trip, masuk mode recovery |
+| **Overpower** | `rasioDaya ≥ 1.05` | Trip, masuk mode recovery |
+| **Sensor Gagal** | 5× pembacaan NaN | Trip, tampilkan error sensor |
 
-### Mekanisme Auto-Reset (Recovery)
+### Mekanisme Auto-Reset
 
+```mermaid
+flowchart LR
+    A["⚡ Relay Trip"] --> B["⏳ Cooldown 60 detik"]
+    B --> C{Beban < 95%\nbatas?}
+    C -->|Ya| D["✅ Relay ON\nAuto-Reset"]
+    C -->|Tidak| E["🔁 Perpanjang\nCooldown"]
+    E --> B
 ```
-Relay Trip → Cooldown 60 detik → Cek beban (< 95% batas?) → Nyala kembali ✅
-                                                            → Perpanjang cooldown ❌
-```
 
-### Batas Default Awal
+### Batas Default
 
 | Parameter | Nilai Default |
-|---|---|
+| --- | --- |
 | Batas Arus | `2.0 A` |
 | Batas Daya | `440 W` |
 
-> Nilai batas disimpan persisten di **Flash ESP32** menggunakan library `Preferences`, sehingga tidak hilang saat restart.
+> Nilai batas disimpan persisten di **Flash ESP32** menggunakan `Preferences`, tidak hilang saat restart.
 
 ---
 
@@ -142,14 +145,14 @@ Relay Trip → Cooldown 60 detik → Cek beban (< 95% batas?) → Nyala kembali 
 
 ```
 smart-relay/
-├── 📄 server.js                     # Server broker Node.js (Express + Socket.IO)
-├── 📄 package.json                  # Konfigurasi dependensi Node.js
-├── 📄 docker-compose.yml            # Konfigurasi Docker untuk CasaOS
-├── 📄 docker-compose.yml.bak        # Backup konfigurasi Docker lama
-├── 📄 Smart_Relay_Protection.ino    # Firmware ESP32 (Arduino/PlatformIO)
-└── 📂 public/
-    ├── 📄 index.html                # Web dashboard (HTML + CSS + Socket.IO + Chart.js)
-    └── 📄 firmware.bin              # File firmware OTA (di-upload melalui dashboard)
+├── server.js                   # Server broker (Express + Socket.IO)
+├── package.json                # Konfigurasi dependensi Node.js
+├── docker-compose.yml          # Konfigurasi Docker untuk CasaOS
+├── docker-compose.yml.bak      # Backup konfigurasi Docker
+├── Smart_Relay_Protection.ino  # Firmware ESP32 (Arduino)
+└── public/
+    ├── index.html              # Web dashboard
+    └── firmware.bin            # File firmware OTA (hasil upload)
 ```
 
 ---
@@ -158,17 +161,18 @@ smart-relay/
 
 ### Server (Node.js)
 - **Node.js** versi `18` atau lebih baru
-- **npm** (sudah termasuk dalam instalasi Node.js)
+- **npm** (sudah termasuk di instalasi Node.js)
 
 ### Docker (Opsional)
-- **Docker Engine** versi `20.10` atau lebih baru
-- **Docker Compose** versi `v2` atau lebih baru
+- **Docker Engine** `20.10+`
+- **Docker Compose** `v2+`
 
 ### Firmware ESP32
-Library Arduino yang dibutuhkan (install via **Library Manager** di Arduino IDE):
+
+Install library berikut via **Arduino IDE → Library Manager**:
 
 | Library | Fungsi |
-|---|---|
+| --- | --- |
 | `WiFiManager` | Konfigurasi WiFi via Access Point |
 | `PZEM004Tv30` | Driver sensor PZEM-004T |
 | `WebSocketsClient` | Koneksi WebSocket ke server |
@@ -181,54 +185,45 @@ Library Arduino yang dibutuhkan (install via **Library Manager** di Arduino IDE)
 
 ## 🚀 Cara Menjalankan Server
 
-### Metode 1: Node.js Langsung
+### Metode 1 — Node.js Langsung
 
 ```bash
-# 1. Masuk ke direktori proyek
-cd smart-relay
-
-# 2. Install dependensi
+# Install dependensi
 npm install
 
-# 3. Jalankan server
+# Jalankan server
 node server.js
 ```
 
-Server akan berjalan di **http://localhost:3000**
+Server berjalan di **`http://localhost:3000`**
 
 ---
 
-### Metode 2: Docker Compose (CasaOS)
-
-Metode ini direkomendasikan untuk deployment di CasaOS/server dengan data persisten di `/DATA/AppData/smart-relay`.
+### Metode 2 — Docker Compose (Rekomendasi untuk CasaOS)
 
 ```bash
-# 1. Masuk ke direktori proyek
-cd smart-relay
-
-# 2. Build dan jalankan container di background
+# Jalankan container di background
 docker compose up -d
 
-# 3. Cek status container
+# Cek status
 docker compose ps
 
-# 4. Lihat log real-time (opsional)
+# Lihat log real-time
 docker compose logs -f
 
-# 5. Hentikan container
+# Hentikan container
 docker compose down
 ```
 
-> **Port:** Server berjalan di **http://localhost:3000** (atau `http://<IP-SERVER>:3000`)
+> **Port:** `http://localhost:3000` atau `http://<IP-SERVER>:3000`
 
-**Catatan volume:**  
-Semua file proyek di-mount dari path host `/DATA/AppData/smart-relay` ke dalam container `/app`, sehingga file `firmware.bin` yang di-upload juga tersimpan persisten.
+> **Volume:** Semua file proyek di-mount dari `/DATA/AppData/smart-relay` ke `/app` di dalam container, sehingga file `firmware.bin` yang di-upload tersimpan persisten.
 
 ---
 
 ## ⚙️ Konfigurasi Firmware ESP32
 
-Edit bagian berikut di awal file `Smart_Relay_Protection.ino` sebelum di-upload:
+Edit baris berikut di awal `Smart_Relay_Protection.ino` sebelum di-upload:
 
 ```cpp
 // Alamat domain/IP server Node.js
@@ -237,35 +232,34 @@ const char* ws_host = "smart-relay.ijuloss.my.id";
 // Port server
 const int ws_port = 443;
 
-// Gunakan SSL (true untuk HTTPS/WSS, false untuk HTTP/WS)
+// Gunakan SSL? (true = WSS/HTTPS, false = WS/HTTP)
 const bool use_ssl = true;
 ```
 
 ### Alur Konfigurasi WiFi Pertama Kali
 
-```
 1. Upload firmware ke ESP32
-2. ESP32 akan membuat Access Point: "SmartRelay_AP"
-3. Hubungkan HP/laptop ke WiFi "SmartRelay_AP"
-4. Browser akan terbuka otomatis (atau buka http://192.168.4.1)
-5. Pilih jaringan WiFi rumah dan masukkan password
-6. ESP32 akan restart dan terhubung ke WiFi
-7. LED GPIO2 menyala → koneksi berhasil ✅
-```
+2. ESP32 membuat Access Point bernama **`SmartRelay_AP`**
+3. Hubungkan HP/laptop ke WiFi `SmartRelay_AP`
+4. Buka browser → `http://192.168.4.1`
+5. Pilih jaringan WiFi dan masukkan password
+6. ESP32 restart dan terhubung ke WiFi
+7. **LED GPIO2 menyala** → koneksi berhasil ✅
 
 ---
 
 ## 📡 Dokumentasi Socket Events
 
-Server berperan sebagai **broker (relay)** yang meneruskan pesan antara ESP32 dan browser.
+Server berperan sebagai **broker** yang meneruskan pesan antara ESP32 dan browser.
 
-### Events dari ESP32 → Server → Browser
+### ESP32 → Server → Browser
 
-| Event | Payload | Keterangan |
-|---|---|---|
-| `espData` | Objek telemetri lengkap | Data sensor real-time dari ESP32 |
+| Event | Keterangan |
+| --- | --- |
+| `espData` | Data telemetri real-time dari ESP32 |
 
 **Contoh payload `espData`:**
+
 ```json
 {
   "v": 220.5,
@@ -286,7 +280,7 @@ Server berperan sebagai **broker (relay)** yang meneruskan pesan antara ESP32 da
 ```
 
 | Field | Tipe | Keterangan |
-|---|---|---|
+| --- | --- | --- |
 | `v` | Float | Tegangan (Volt) |
 | `i` | Float | Arus terfilter EMA (Ampere) |
 | `p` | Float | Daya terfilter EMA (Watt) |
@@ -295,118 +289,93 @@ Server berperan sebagai **broker (relay)** yang meneruskan pesan antara ESP32 da
 | `pf` | Float | Power Factor |
 | `relay` | String | Status relay: `"ON"` / `"OFF"` |
 | `alasan` | String | Keterangan kondisi sistem |
-| `rI` | Float | Rasio arus (I / batasArus) |
-| `fzI` | String | Himpunan arus: `"Normal"` / `"Overload"` |
-| `rP` | Float | Rasio daya (P / batasDaya) |
-| `fzP` | String | Himpunan daya: `"Normal"` / `"Overpower"` |
-| `fzV` | String | Himpunan tegangan: `"Normal"` / `"Overvoltage"` / `"Undervoltage"` |
-| `recovery` | Boolean | `true` jika sedang dalam mode cooldown |
+| `rI` | Float | Rasio arus (I ÷ batasArus) |
+| `fzI` | String | `"Normal"` / `"Overload"` |
+| `rP` | Float | Rasio daya (P ÷ batasDaya) |
+| `fzP` | String | `"Normal"` / `"Overpower"` |
+| `fzV` | String | `"Normal"` / `"Overvoltage"` / `"Undervoltage"` |
+| `recovery` | Boolean | `true` jika dalam mode cooldown |
 
 ---
 
-### Events dari Browser → Server → ESP32
+### Browser → Server → ESP32
 
 | Event | Payload | Keterangan |
-|---|---|---|
+| --- | --- | --- |
 | `setLimits` | `{ i: float, p: float }` | Update batas arus dan daya |
-| `setNetwork` | `{ ip: string, gw: string }` | Konfigurasi IP statis ESP32 |
+| `setNetwork` | `{ ip: string, gw: string }` | Set IP statis ESP32 |
 | `command` | String | Perintah langsung ke ESP32 |
 
-**Daftar perintah (`command`):**
+**Daftar nilai `command`:**
 
 | Perintah | Fungsi |
-|---|---|
-| `resetRecovery` | Paksa reset mode cooldown, relay ON kembali |
+| --- | --- |
+| `resetRecovery` | Paksa reset mode cooldown, relay ON |
 | `resetKwh` | Reset akumulasi energi (kWh) ke 0 |
-| `startOta` | Perintahkan ESP32 unduh & pasang firmware baru |
-| `resetWifi` | Hapus data WiFi, ESP32 buat ulang Access Point |
+| `startOta` | Perintah ESP32 unduh & pasang firmware |
+| `resetWifi` | Hapus konfigurasi WiFi, buat ulang AP |
 
 ---
 
-### Events dari Server → Browser (sinkronisasi)
+### Server → Browser (Sinkronisasi)
 
 | Event | Payload | Keterangan |
-|---|---|---|
-| `sensorData` | Objek telemetri | Data sensor real-time (broadcast) |
-| `updateLimits` | `{ i: float, p: float }` | Sinkronisasi limit ke semua tab yang terbuka |
+| --- | --- | --- |
+| `sensorData` | Objek telemetri | Broadcast data sensor ke semua browser |
+| `updateLimits` | `{ i: float, p: float }` | Sinkronisasi limit ke semua tab |
 
 ---
 
 ## 📡 Dokumentasi REST API
 
 ### `POST /upload-ota`
-Upload file firmware `.bin` untuk pembaruan OTA ke ESP32.
 
-**Request:** `multipart/form-data` dengan field `firmware` berisi file `.bin`
+Upload file firmware `.bin` untuk OTA ke ESP32.
 
-**Contoh dengan `curl`:**
+- **Request:** `multipart/form-data`, field: `firmware` (file `.bin`)
+- **Response:** `Deploy sukses! ESP32 sedang menarik firmware...`
+
 ```bash
+# Contoh menggunakan curl
 curl -X POST http://localhost:3000/upload-ota \
-  -F "firmware=@/path/ke/Smart_Relay_Protection.ino.bin"
+  -F "firmware=@/path/ke/firmware.bin"
 ```
 
-**Response:**
-```
-Deploy sukses! ESP32 sedang menarik firmware...
-```
-
-> Setelah upload berhasil, server otomatis mengirimkan event `startOta` ke ESP32 via Socket.IO.
+> Setelah upload, server otomatis mengirim event `startOta` ke ESP32.
 
 ---
 
 ### Static Files
-Semua file di folder `public/` dapat diakses langsung:
 
-| URL | File | Keterangan |
-|---|---|---|
-| `http://localhost:3000/` | `public/index.html` | Web Dashboard |
-| `http://localhost:3000/firmware.bin` | `public/firmware.bin` | File firmware untuk ESP32 tarik via OTA |
-| `http://localhost:3000/socket.io/socket.io.js` | *(auto)* | Library Socket.IO client |
+| URL | Keterangan |
+| --- | --- |
+| `http://localhost:3000/` | Web Dashboard |
+| `http://localhost:3000/firmware.bin` | File firmware untuk OTA |
+| `http://localhost:3000/socket.io/socket.io.js` | Library Socket.IO client |
 
 ---
 
 ## 🔄 Fitur OTA Update
 
-Sistem mendukung pembaruan firmware ESP32 secara nirkabel tanpa koneksi USB.
-
-**Prosedur OTA:**
-
-```
-1. Compile sketch Arduino → export file .bin
-   (Arduino IDE: Sketch → Export Compiled Binary)
-
+1. Compile sketch Arduino → **Sketch → Export Compiled Binary** (`.bin`)
 2. Buka dashboard web di browser
+3. Pilih file `.bin` di panel **OTA Upload**
+4. Klik **Deploy Firmware**
+5. Server simpan file ke `public/firmware.bin` dan kirim sinyal ke ESP32
+6. ESP32 unduh firmware dari `https://<ws_host>/firmware.bin`
+7. ESP32 update dan restart otomatis ✅
 
-3. Pilih file firmware .bin di panel OTA Upload
-
-4. Klik tombol [Deploy Firmware]
-
-5. Server menyimpan file ke public/firmware.bin
-   dan mengirim sinyal ke ESP32
-
-6. ESP32 mengunduh firmware dari:
-   https://<ws_host>:<ws_port>/firmware.bin
-
-7. ESP32 melakukan update dan restart otomatis ✅
-```
-
-> ⚠️ Pastikan ukuran partisi flash ESP32 mencukupi untuk update OTA (minimal 4MB flash).
+> ⚠️ Partisi flash ESP32 minimal **4MB** diperlukan untuk mendukung OTA.
 
 ---
 
 ## 🌐 Fitur Konfigurasi Jaringan
 
-IP statis ESP32 dapat diatur dari jarak jauh melalui dashboard tanpa perlu sentuh perangkat fisik.
-
-**Prosedur:**
-```
-1. Buka panel "Konfigurasi Jaringan" di dashboard
-2. Masukkan IP Statis (contoh: 192.168.1.100)
-3. Masukkan IP Gateway (contoh: 192.168.1.1)
-4. Klik [Simpan & Restart]
-5. ESP32 menyimpan konfigurasi ke Flash (Preferences)
-6. ESP32 restart dan menggunakan IP statis baru ✅
-```
+1. Buka panel **Konfigurasi Jaringan** di dashboard
+2. Isi **IP Statis** (contoh: `192.168.1.100`)
+3. Isi **IP Gateway** (contoh: `192.168.1.1`)
+4. Klik **Simpan & Restart**
+5. ESP32 simpan konfigurasi ke Flash lalu restart ✅
 
 > Konfigurasi tersimpan persisten — tidak hilang meski ESP32 mati atau restart.
 
@@ -414,25 +383,28 @@ IP statis ESP32 dapat diatur dari jarak jauh melalui dashboard tanpa perlu sentu
 
 ## 🖥️ Dashboard Web
 
-Akses dashboard melalui browser:
-- **Lokal:** `http://localhost:3000`
-- **Jaringan:** `http://<IP-SERVER>:3000`
-- **Domain (jika ada):** `https://smart-relay.ijuloss.my.id`
+Akses melalui browser:
 
-**Fitur dashboard:**
+| Akses | URL |
+| --- | --- |
+| Lokal | `http://localhost:3000` |
+| Jaringan | `http://<IP-SERVER>:3000` |
+| Domain | `https://smart-relay.ijuloss.my.id` |
+
+**Fitur yang tersedia:**
 
 | Panel | Fungsi |
-|---|---|
+| --- | --- |
 | **Status Koneksi** | Indikator koneksi WebSocket ke server dan ESP32 |
-| **Telemetri Utama** | Tegangan (V), Arus (A), Daya (W), Energi (kWh), Frekuensi (Hz), PF |
-| **Status Relay** | Tampilan ON/OFF + keterangan kondisi sistem |
-| **Rasio Beban** | Progress bar rasio arus dan daya terhadap batas |
-| **Himpunan Fuzzy** | Label status: Normal / Overload / Overvoltage / dll |
-| **Chart Real-time** | Grafik arus dan daya yang diperbarui secara live |
-| **Set Batas** | Input untuk mengubah batas arus (A) dan daya (W) |
-| **Kontrol Relay** | Tombol Reset Recovery, Reset kWh, Reset WiFi |
-| **OTA Upload** | Form upload firmware `.bin` dan trigger update |
-| **Konfigurasi IP** | Form set IP statis dan gateway ESP32 |
+| **Telemetri Utama** | Tegangan, Arus, Daya, Energi, Frekuensi, PF |
+| **Status Relay** | Status ON/OFF dan keterangan kondisi sistem |
+| **Rasio Beban** | Progress bar rasio arus & daya terhadap batas |
+| **Himpunan Status** | Label: Normal / Overload / Overvoltage / dll |
+| **Chart Real-time** | Grafik arus dan daya live |
+| **Set Batas** | Input ubah batas arus (A) dan daya (W) |
+| **Kontrol Relay** | Reset Recovery, Reset kWh, Reset WiFi |
+| **OTA Upload** | Upload firmware `.bin` dan trigger update |
+| **Konfigurasi IP** | Set IP statis dan gateway ESP32 |
 | **Dark / Light Mode** | Toggle tema tampilan |
 
 ---
@@ -440,15 +412,15 @@ Akses dashboard melalui browser:
 ## 🔧 Troubleshooting
 
 | Masalah | Kemungkinan Penyebab | Solusi |
-|---|---|---|
-| ESP32 tidak konek ke server | URL WebSocket salah / server mati | Periksa `ws_host` dan `ws_port` di firmware; pastikan server aktif |
-| Dashboard tidak menerima data | ESP32 offline atau socket belum `ready` | Cek log server; tunggu `socketIoReady = true` |
-| Relay trip terus (false trip) | Inrush current tinggi | Kurangi nilai `ALPHA` pada filter EMA di firmware |
-| OTA gagal | File `.bin` salah / URL tidak bisa diakses | Pastikan server bisa diakses dari ESP32; cek log serial |
-| LED WiFi tidak menyala | Gagal konek WiFi | Reset WiFi dengan perintah `resetWifi` dari dashboard, lalu konfigurasi ulang |
-| Nilai sensor selalu NaN | PZEM tidak terhubung / wiring salah | Periksa wiring TX/RX dan catu daya PZEM |
-| Container Docker restart loop | Port 3000 sudah dipakai | Ganti port di `docker-compose.yml` |
-| IP statis tidak berfungsi | Gateway tidak valid | Pastikan gateway berada di subnet yang sama dengan IP statis |
+| --- | --- | --- |
+| ESP32 tidak konek ke server | URL WebSocket salah / server mati | Cek `ws_host` dan `ws_port` di firmware |
+| Dashboard tidak terima data | ESP32 offline / socket belum ready | Lihat log server; tunggu `socketIoReady = true` |
+| Relay trip terus (false trip) | Inrush current tinggi | Kecilkan nilai `ALPHA` pada filter EMA |
+| OTA gagal | File `.bin` salah / server tidak terjangkau | Pastikan server dapat diakses dari ESP32 |
+| LED WiFi tidak menyala | Gagal konek WiFi | Jalankan `resetWifi` dari dashboard, atur ulang WiFi |
+| Nilai sensor selalu NaN | PZEM tidak terhubung / wiring salah | Periksa koneksi TX/RX dan catu daya PZEM |
+| Container Docker restart loop | Port 3000 sudah dipakai proses lain | Ganti port host di `docker-compose.yml` |
+| IP statis tidak berfungsi | Gateway tidak satu subnet | Pastikan gateway dan IP dalam subnet yang sama |
 
 ---
 
@@ -457,28 +429,28 @@ Akses dashboard melalui browser:
 ### Server (Node.js)
 
 | Package | Versi | Fungsi |
-|---|---|---|
-| [express](https://expressjs.com/) | `^4.18.2` | HTTP server, routing, static files |
-| [socket.io](https://socket.io/) | `^4.7.2` | WebSocket broker real-time (dengan fallback polling) |
-| [multer](https://github.com/expressjs/multer) | `^1.4.5-lts.1` | Middleware upload file (OTA firmware) |
+| --- | --- | --- |
+| [express](https://expressjs.com/) | `^4.18.2` | HTTP server, routing, static file serving |
+| [socket.io](https://socket.io/) | `^4.7.2` | WebSocket broker real-time |
+| [multer](https://github.com/expressjs/multer) | `^1.4.5-lts.1` | Upload file firmware (OTA) |
 
 ### Dashboard (CDN)
 
 | Library | Fungsi |
-|---|---|
+| --- | --- |
 | [Socket.IO Client](https://socket.io/) | Koneksi WebSocket dari browser |
 | [Chart.js](https://www.chartjs.org/) | Grafik real-time arus dan daya |
-| [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) | Tipografi dashboard |
+| [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) | Tipografi utama dashboard |
 | [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) | Font monospace untuk nilai numerik |
 
 ---
 
 ## 📝 Lisensi
 
-Proyek ini dibuat untuk keperluan **penelitian dan pengembangan** sistem proteksi beban listrik cerdas berbasis IoT. Bebas digunakan dan dimodifikasi untuk keperluan pendidikan dan riset.
+Proyek ini dibuat untuk keperluan penelitian dan pengembangan sistem proteksi beban listrik cerdas berbasis IoT. Bebas digunakan dan dimodifikasi untuk keperluan pendidikan dan riset.
 
 ---
 
 <div align="center">
-  <sub>Dibuat dengan ❤️ untuk sistem Smart Home IoT &nbsp;·&nbsp; ESP32 + PZEM-004T + Node.js + Socket.IO + Docker</sub>
+  <sub>ESP32 · PZEM-004T · Node.js · Socket.IO · Docker</sub>
 </div>
